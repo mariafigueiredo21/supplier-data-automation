@@ -9,7 +9,7 @@
 # Frequency: Monthly
 # Estimated time saved per execution: ~1h30
 #
-# Author: Maria Simões
+# Author: Maria Simões Figueiredo
 # Last Updated: 2025-10-22 (sanitized)
 #######################################################################
 
@@ -24,6 +24,7 @@ import win32com.client
 # Replace these example paths with local test folders when running locally.
 # Do NOT commit real company paths or real data to a public repo.
 # -----------------------------
+
 # Folder containing new supplier Excel files to import (anonymized)
 SOURCE_FOLDER = os.path.expanduser(r"~/Documents/supplier_automation/to_import")
 
