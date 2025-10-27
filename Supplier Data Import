@@ -1,14 +1,14 @@
 #######################################################################
 # Supplier Data Import - SANITIZED VERSION
-#
+
 # Purpose:
-#   Automate importation and consolidation of supplier data for reports.
-#   This is an anonymized version suitable for public sharing (no company
-#   names, no real network paths, no sensitive filenames).
-#
+    #   Automate importation and consolidation of supplier data for reports.
+    #   This is an anonymized version suitable for public sharing (no company
+    #   names, no real network paths, no sensitive filenames).
+
 # Frequency: Monthly
 # Estimated time saved per execution: ~1h30
-#
+
 # Author: Maria Simões Figueiredo
 # Last Updated: 2025-10-22 (sanitized)
 #######################################################################
