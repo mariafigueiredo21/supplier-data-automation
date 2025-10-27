@@ -1,0 +1,283 @@
+#######################################################################
+# Sustainability Weekly Updater - SANITIZED VERSION
+#
+# Purpose:
+#   Automate the weekly update of sustainability-related Excel workbooks.
+#   Steps included:
+#       1. Refresh all Power Query connections in auxiliary and mapping files.
+#       2. Synchronize item lists (e.g., SKUs) between workbooks.
+#       3. Transfer filtered data and replicate formulas.
+#       4. Display live progress updates in Excel’s status bar.
+#       5. Highlight newly added rows in the mapping sheet.
+#
+# Frequency: Weekly
+# Estimated time saved per execution: ~1h
+# Annual time saved: ≈ 52h (~6.5 working days)
+#
+# Author: Maria Simões
+# Last Updated: 2025-10-22 (sanitized)
+#######################################################################
+
+import os
+import time
+import pandas as pd
+import xlwings as xw
+import win32com.client
+import winsound
+
+#######################################################################
+# CONFIGURATION SECTION
+#######################################################################
+
+# All file paths below are generic placeholders.
+# Replace with local test files or anonymized copies for demonstration.
+
+AUXILIARY_FILE = os.path.expanduser(
+    r"~/Documents/sustainability_automation/Auxiliary_Data.xlsx"
+)
+MAPPING_FILE = os.path.expanduser(
+    r"~/Documents/sustainability_automation/Mapping.xlsm"
+)
+
+# Optional sound for completion feedback (Windows only)
+SUCCESS_SOUND = r"C:\Windows\Media\Windows Unlock.wav"
+
+#######################################################################
+# UTILITIES
+#######################################################################
+
+def safe_status(excel_app, message, retries=3, delay=0.3):
+    """Safely updates Excel's StatusBar even if Excel is busy."""
+    for _ in range(retries):
+        try:
+            excel_app.StatusBar = message
+            return
+        except Exception as e:
+            if "0x800ac472" in str(e):  # Excel busy
+                time.sleep(delay)
+                continue
+            else:
+                raise
+    print(f"⚠️ Could not update StatusBar (Excel busy): {message}")
+
+def excel_progress(excel_app, step, total, description=""):
+    """Shows progress in console and Excel status bar."""
+    perc = (step / total) * 100
+    blocks = int(perc // 5)
+    bar = "▮" * blocks + "▯" * (20 - blocks)
+    msg = f"✨ {description} | {bar} {perc:5.1f}%"
+    safe_status(excel_app, msg)
+    print(msg)
+
+def update_excel_file(path):
+    """Opens and refreshes all Power Query connections in a workbook."""
+    print(f"\n📂 Opening workbook: {os.path.basename(path)}")
+    excel = win32com.client.DispatchEx("Excel.Application")
+    excel.Visible = False
+    excel.DisplayAlerts = False
+    failures = []
+
+    try:
+        wb = excel.Workbooks.Open(path)
+
+        try:
+            queries = wb.Queries
+            print("📊 Queries in workbook:")
+            for query in queries:
+                print(f"   - {query.Name}")
+        except AttributeError:
+            print("ℹ️ No Power Query objects accessible (expected in test copy).")
+
+        for connection in wb.Connections:
+            try:
+                print(f"→ Refreshing: {connection.Name}")
+                connection.Refresh()
+                excel.CalculateUntilAsyncQueriesDone()
+            except Exception as e:
+                print(f"⚠️ Error refreshing '{connection.Name}': {e}")
+                failures.append(connection.Name)
+
+        wb.Save()
+        wb.Close(False)
+
+    except Exception as e:
+        print(f"❌ Error opening or updating {path}: {e}")
+
+    finally:
+        try:
+            excel.Quit()
+        except:
+            pass
+
+    if failures:
+        print("❌ Some connections failed:")
+        for f in failures:
+            print(f" - {f}")
+    else:
+        print("🎉 All queries/connections refreshed successfully.")
+
+
+#######################################################################
+# MAIN WORKFLOW
+#######################################################################
+
+global_start = time.time()
+
+try:
+    excel_main = win32com.client.GetActiveObject("Excel.Application")
+except:
+    excel_main = win32com.client.Dispatch("Excel.Application")
+excel_main.Visible = True
+
+total_steps = 6
+step = 1
+
+#######################################################################
+# STEP 1 - UPDATE AUXILIARY WORKBOOK
+#######################################################################
+step += 1
+excel_progress(excel_main, step, total_steps, "Updating Auxiliary workbook")
+
+aux_start = time.time()
+update_excel_file(AUXILIARY_FILE)
+aux_end = time.time()
+print(f"⏱️ Auxiliary workbook refreshed in {(aux_end - aux_start)/60:.2f} min.")
+
+#######################################################################
+# STEP 2 - UPDATE MAPPING WORKBOOK
+#######################################################################
+step += 1
+excel_progress(excel_main, step, total_steps, "Updating Mapping workbook")
+
+map_start = time.time()
+wb = xw.Book(MAPPING_FILE)
+failures = []
+
+print("\n🔄 Refreshing Power Query connections in Mapping workbook...")
+for connection in wb.api.Connections:
+    try:
+        print(f"→ Refreshing: {connection.Name}")
+        connection.Refresh()
+        wb.app.api.CalculateUntilAsyncQueriesDone()
+    except Exception as e:
+        print(f"⚠️ Error refreshing '{connection.Name}': {e}")
+        failures.append(connection.Name)
+
+if failures:
+    print("❌ Some connections failed:")
+    for f in failures:
+        print(f" - {f}")
+else:
+    print("🎉 All Mapping connections refreshed successfully!")
+
+wb.save()
+map_end = time.time()
+print(f"⏱️ Mapping workbook refreshed in {(map_end - map_start)/60:.2f} min.")
+
+#######################################################################
+# STEP 3 - SYNCHRONIZE ITEM LISTS (E.G., SKUs)
+#######################################################################
+step += 1
+excel_progress(excel_main, step, total_steps, "Reading item list from Mapping workbook")
+
+app = xw.apps.active
+wb_mapping = app.books["Mapping.xlsm"]
+ws_mapping = wb_mapping.sheets["MAPEAMENTO"]  # generic sheet name
+
+last_row_mapping = ws_mapping.range("I" + str(ws_mapping.cells.last_cell.row)).end("up").row
+insert_row = last_row_mapping + 1
+existing_items = [
+    s for s in ws_mapping.range(f"I7:I{last_row_mapping}").value if s is not None
+]
+print(f"✅ {len(existing_items)} items found in Mapping (column I).")
+
+#######################################################################
+# STEP 4 - TRANSFER FILTERED DATA FROM AUXILIARY WORKBOOK
+#######################################################################
+step += 1
+excel_progress(excel_main, step, total_steps, "Transferring filtered data")
+
+app_aux = xw.App(visible=False)
+wb_aux = app_aux.books.open(AUXILIARY_FILE)
+ws_aux = wb_aux.sheets["Auxiliar"]
+
+# Example data extraction — assumes filters based on test data
+last_row_aux = ws_aux.range("D" + str(ws_aux.cells.last_cell.row)).end("up").row
+data = ws_aux.range(f"D5:Y{last_row_aux}").value
+df = pd.DataFrame(data[1:], columns=data[0])
+
+# Example condition: filter "Yes"/"No"/"OK" pattern
+filtered = df[
+    (df.iloc[:, 0] == "Yes")
+    & (df.iloc[:, 1] == "No")
+    & (df.iloc[:, -1] == "OK")
+]
+print(f"🔎 {len(filtered)} rows matched filter conditions in Auxiliary data.")
+
+# Mapping columns between workbooks (simplified)
+column_map = [(2, "E"), (3, "F"), (4, "G"), (5, "H"), (6, "I")]
+
+for idx_col, map_col in column_map:
+    if idx_col < len(filtered.columns):
+        values = [[v] for v in filtered.iloc[:, idx_col].tolist()]
+        ws_mapping.range(f"{map_col}{insert_row}").value = values
+        print(f"📤 Column {idx_col} (Aux) → {map_col} (Map) [{len(values)} rows]")
+
+wb_aux.close()
+app_aux.quit()
+
+#######################################################################
+# STEP 5 - REPLICATE FORMULAS AND HIGHLIGHT NEW ROWS
+#######################################################################
+step += 1
+excel_progress(excel_main, step, total_steps, "Replicating formulas and highlighting new rows")
+
+new_rows = len(filtered)
+if new_rows > 0:
+    last_row = insert_row - 1
+    final_row = insert_row + new_rows - 1
+
+    print(f"📈 Copying formulas to {new_rows} new rows...")
+
+    formula_cols = ["A:D", "Q:R", "T:T", "V:W", "Y:Y"]
+    for fr in formula_cols:
+        try:
+            start_col, end_col = fr.split(":")
+            start_idx = ws_mapping.range(f"{start_col}{last_row}").column
+            end_idx = ws_mapping.range(f"{end_col}{last_row}").column
+
+            for col_idx in range(start_idx, end_idx + 1):
+                col_letter = xw.utils.col_name(col_idx)
+                formula = ws_mapping.range(f"{col_letter}{last_row}").formula
+                if formula:
+                    ws_mapping.range(f"{col_letter}{insert_row}:{col_letter}{final_row}").formula = formula
+                    print(f"↳ Formula replicated in column {col_letter}")
+        except Exception as e:
+            print(f"⚠️ Error copying formulas in range {fr}: {e}")
+
+    # Highlight new rows (light green)
+    highlight_col = "I"
+    ws_mapping.range(f"{highlight_col}{insert_row}:{highlight_col}{final_row}").color = (225, 242, 206)
+    print(f"🎨 Highlighted {new_rows} new rows in column {highlight_col} (color #E1F2CE).")
+else:
+    print("ℹ️ No new rows to replicate formulas.\n")
+
+#######################################################################
+# STEP 6 - FINISH PROCESS
+#######################################################################
+safe_status(excel_main, "✅ Process completed successfully!")
+
+global_end = time.time()
+duration = global_end - global_start
+minutes, seconds = divmod(duration, 60)
+print(f"\n🏁 TOTAL execution time: {int(minutes)}m {seconds:.2f}s")
+
+# Play success sound (optional)
+if os.path.exists(SUCCESS_SOUND):
+    winsound.PlaySound(SUCCESS_SOUND, winsound.SND_FILENAME)
+else:
+    winsound.MessageBeep(winsound.MB_ICONASTERISK)
+
+time.sleep(2)
+safe_status(excel_main, False)
+print("✅ Weekly sustainability update process completed (sanitized version).")
