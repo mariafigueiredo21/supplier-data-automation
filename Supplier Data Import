@@ -1,0 +1,336 @@
+#######################################################################
+# Supplier Data Import - SANITIZED VERSION
+#
+# Purpose:
+#   Automate importation and consolidation of supplier data for reports.
+#   This is an anonymized version suitable for public sharing (no company
+#   names, no real network paths, no sensitive filenames).
+#
+# Frequency: Monthly
+# Estimated time saved per execution: ~1h30
+#
+# Author: Maria Simões
+# Last Updated: 2025-10-22 (sanitized)
+#######################################################################
+
+import os
+import time
+import shutil
+import pandas as pd
+import win32com.client
+
+# -----------------------------
+# CONFIGURE BEFORE RUNNING
+# Replace these example paths with local test folders when running locally.
+# Do NOT commit real company paths or real data to a public repo.
+# -----------------------------
+# Folder containing new supplier Excel files to import (anonymized)
+SOURCE_FOLDER = os.path.expanduser(r"~/Documents/supplier_automation/to_import")
+
+# An anonymized "import" workbook used for initial Power Query refresh and
+# as the place where the consolidated table ("BD") lives.
+IMPORT_FILE = os.path.expanduser(
+    r"~/Documents/supplier_automation/import_workbook.xlsx"
+)
+
+# Destination workbook where consolidated data will be pasted.
+DEST_FILE = os.path.expanduser(
+    r"~/Documents/supplier_automation/aggregator_workbook.xlsx"
+)
+
+# Folder to move processed files to (archive).
+ARCHIVE_DIR = os.path.expanduser(r"~/Documents/supplier_automation/archive")
+
+# -----------------------------
+# Helper: pretty timestamp
+# -----------------------------
+def now_str():
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+# -----------------------------
+# START
+# -----------------------------
+start = time.time()
+print(f"\n[{now_str()}] 🔎 Checking if there are new supplier files to import...")
+
+# Ensure source folder exists
+os.makedirs(SOURCE_FOLDER, exist_ok=True)
+
+# List valid .xlsx files (ignore temporary ones)
+try:
+    files_to_import = [
+        f for f in os.listdir(SOURCE_FOLDER)
+        if f.lower().endswith(".xlsx") and not f.startswith("~$")
+    ]
+except Exception as e:
+    print(f"❌ Error accessing source folder: {e}")
+    files_to_import = []
+
+if not files_to_import:
+    print("⚠️ No new supplier files found in import folder.")
+    print("✅ Import process completed — nothing to process.\n")
+    end = time.time()
+    minutes, seconds = divmod(end - start, 60)
+    print(f"⏱️ Total runtime: {int(minutes)}m {seconds:.2f}s")
+    raise SystemExit  # stop script
+
+else:
+    print(f"📁 Found {len(files_to_import)} file(s) to import:")
+    for f in files_to_import:
+        print(f"   • {f}")
+    print("\n✅ Proceeding with import process...\n")
+
+# -----------------------------
+# STEP 1 - Refresh import workbook Power Query connections
+# -----------------------------
+print("\n🔄 Opening import file and refreshing Power Query connections...")
+
+excel = win32com.client.DispatchEx("Excel.Application")
+excel.Visible = False
+excel.DisplayAlerts = False
+
+failures = []
+wb = None
+
+try:
+    wb = excel.Workbooks.Open(IMPORT_FILE)
+
+    # Try to list queries (may not be present in simplified example)
+    try:
+        queries = wb.Queries
+        print("📊 Queries found in workbook:")
+        for query in queries:
+            print(f"   • {query.Name}")
+    except AttributeError:
+        print("⚠️ No accessible Power Query objects in this workbook (expected in sanitized copy).")
+
+    for connection in wb.Connections:
+        try:
+            print(f"→ Refreshing: {connection.Name}")
+            connection.Refresh()
+            excel.CalculateUntilAsyncQueriesDone()
+        except Exception as e:
+            print(f"⚠️ Failed to refresh '{connection.Name}': {e}")
+            failures.append(connection.Name)
+
+    wb.Save()
+
+except Exception as e:
+    print(f"❌ Could not open or refresh import workbook: {e}")
+
+finally:
+    try:
+        if wb is not None:
+            wb.Close(False)
+    except:
+        pass
+    try:
+        excel.Quit()
+    except:
+        pass
+
+if failures:
+    print("❌ Some connections failed:")
+    for f in failures:
+        print(f"   - {f}")
+else:
+    print("🎉 Initial refresh completed successfully (or none were present).")
+
+# -----------------------------
+# STEP 2 - LOAD AND ANALYZE SUPPLIER DATA FROM IMPORT WORKBOOK
+# -----------------------------
+print("\n📂 Loading 'BD' sheet from import workbook (anonymized)...")
+
+try:
+    data = pd.read_excel(IMPORT_FILE, sheet_name="BD", engine="openpyxl")
+    print(f"✅ Table loaded successfully ({len(data)} rows)")
+except Exception as e:
+    print(f"❌ Error reading table 'BD' from import workbook: {e}")
+    data = pd.DataFrame()
+
+if not data.empty:
+    # Assume supplier identifier is in first column for this example
+    col0 = data.iloc[:, 0].dropna().astype(str).unique()
+    col0_sorted = sorted(set(col0))
+    print(f"\n📊 Found {len(col0_sorted)} unique supplier identifiers in first column.")
+
+    files_in_folder = [os.path.splitext(f)[0] for f in os.listdir(SOURCE_FOLDER) if f.lower().endswith(".xlsx")]
+    files_sorted = sorted(set(files_in_folder))
+    print(f"📁 Found {len(files_sorted)} Excel files in import folder.")
+
+    # Compare names and files (simple string comparison)
+    missing = [n for n in col0_sorted if n not in files_sorted]
+    extra = [f for f in files_sorted if f not in col0_sorted]
+
+    print("\n🔍 Comparing table identifiers vs import filenames:")
+    if not missing and not extra:
+        print("✅ All identifiers match the import files (sanitized check).")
+    else:
+        if missing:
+            print(f"⚠️ Missing files for {len(missing)} identifier(s):")
+            for f in missing:
+                print(f"   - {f}")
+        if extra:
+            print(f"⚠️ Extra files not referenced in table ({len(extra)}):")
+            for f in extra:
+                print(f"   - {f}")
+else:
+    print("⚠️ The supplier table is empty — nothing to analyze.")
+
+# -----------------------------
+# STEP 3 - PASTE INTO DESTINATION (anonymized)
+# -----------------------------
+print(f"\n📘 Opening destination file (anonymized):\n   {DEST_FILE}")
+
+excel = win32com.client.DispatchEx("Excel.Application")
+excel.Visible = False
+excel.DisplayAlerts = False
+
+wb_dest = None
+try:
+    wb_dest = excel.Workbooks.Open(DEST_FILE)
+    ws_dest = wb_dest.Sheets("BD")  # expects a sheet named 'BD'
+
+    # Find last row in column A (xlUp = -4162)
+    last_row = ws_dest.Cells(ws_dest.Rows.Count, 1).End(-4162).Row
+    next_row = last_row + 1
+
+    print(f"📍 Last filled row in destination: {last_row}")
+    print(f"📍 Next available row: {next_row}")
+
+    # Convert datetime columns if present
+    for col in data.select_dtypes(include=["datetime64[ns]", "datetimetz"]).columns:
+        data[col] = data[col].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    if not data.empty:
+        values = data.astype(str).values.tolist()
+        rows, cols = len(values), len(values[0])
+
+        dest_range = ws_dest.Range(
+            ws_dest.Cells(next_row, 1),
+            ws_dest.Cells(next_row + rows - 1, cols)
+        )
+        print(f"📥 Pasting {rows} rows into destination...")
+        dest_range.Value = values
+
+        # Optionally copy a formula from the previous last row in column M (13)
+        try:
+            formula = ws_dest.Cells(last_row, 13).Formula
+        except Exception:
+            formula = None
+
+        if formula:
+            for r in range(next_row, next_row + rows):
+                ws_dest.Cells(r, 13).Formula = formula
+            print(f"✅ Formula copied to {rows} new rows in column 13.")
+        else:
+            print("ℹ️ No formula found in column 13 — step skipped.")
+
+        wb_dest.Save()
+        print(f"\n✅ Data successfully pasted into destination file. ({rows} rows added)")
+    else:
+        print("ℹ️ No data to paste (data frame empty).")
+
+except Exception as e:
+    print(f"❌ Error opening or updating destination workbook: {e}")
+
+finally:
+    try:
+        if wb_dest is not None:
+            wb_dest.Close(False)
+    except:
+        pass
+    try:
+        excel.Quit()
+    except:
+        pass
+
+# -----------------------------
+# STEP 4 - MOVE PROCESSED FILES TO ARCHIVE (anonymized)
+# -----------------------------
+print("\n📦 Moving processed files to archive folder (anonymized)...")
+os.makedirs(ARCHIVE_DIR, exist_ok=True)
+
+moved, failed = [], []
+
+for file in os.listdir(SOURCE_FOLDER):
+    if file.lower().endswith(".xlsx"):
+        src = os.path.join(SOURCE_FOLDER, file)
+        dst = os.path.join(ARCHIVE_DIR, file)
+        try:
+            shutil.move(src, dst)
+            moved.append(file)
+        except Exception as e:
+            print(f"⚠️ Error moving '{file}': {e}")
+            failed.append(file)
+
+if moved:
+    print(f"✅ {len(moved)} file(s) moved successfully to archive:")
+    for f in moved:
+        print(f"   • {f}")
+else:
+    print("⚠️ No files found to move (or none moved).")
+
+if failed:
+    print(f"\n❌ Failed to move {len(failed)} file(s):")
+    for f in failed:
+        print(f"   - {f}")
+
+# -----------------------------
+# STEP 5 - FINAL REFRESH (optional verification)
+# -----------------------------
+print("\n🔄 Reopening import file for final refresh/verification (anonymized)...")
+
+excel = win32com.client.DispatchEx("Excel.Application")
+excel.Visible = False
+excel.DisplayAlerts = False
+
+failures = []
+wb = None
+try:
+    wb = excel.Workbooks.Open(IMPORT_FILE)
+    for connection in wb.Connections:
+        try:
+            print(f"→ Refreshing: {connection.Name}")
+            connection.Refresh()
+            excel.CalculateUntilAsyncQueriesDone()
+        except Exception as e:
+            print(f"⚠️ Failed to refresh '{connection.Name}': {e}")
+            failures.append(connection.Name)
+    wb.Save()
+except Exception as e:
+    print(f"❌ Could not re-open import workbook for final refresh: {e}")
+finally:
+    try:
+        if wb is not None:
+            wb.Close(False)
+    except:
+        pass
+    try:
+        excel.Quit()
+    except:
+        pass
+
+if failures:
+    print("❌ Some connections failed during final refresh:")
+    for f in failures:
+        print(f"   - {f}")
+else:
+    print("🎉 Final refresh completed successfully (or none present).")
+
+# -----------------------------
+# STEP 6 - COUNT FINAL ROWS IN IMPORT SHEET
+# -----------------------------
+print("\n📊 Counting total non-empty rows in final table (import workbook 'BD' sheet)...")
+
+try:
+    df_check = pd.read_excel(IMPORT_FILE, sheet_name="BD", engine="openpyxl")
+    row_count = df_check.dropna(how="all").shape[0]
+    print(f"✅ Final table contains {row_count} non-empty rows.")
+except Exception as e:
+    print(f"❌ Error reading final table for count: {e}")
+
+end = time.time()
+minutes, seconds = divmod(end - start, 60)
+print(f"\n⏱️ Total runtime: {int(minutes)}m {seconds:.2f}s")
+print("\n✅ Full anonymized automation process completed successfully!")
